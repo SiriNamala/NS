@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from torch.distributions import Categorical
+from torch.distributions import Categorical, MultivariateNormal
 
 
 class RolloutBuffer:
@@ -64,6 +64,20 @@ class Actor(nn.Module):
         value = self.linear3(output)
         return value
 
+    def act(self, state):
+        if self.has_continuous_action_space:
+            action_mean = self.actor(state)
+            cov_mat = torch.diag(self.action_var).unsqueeze(dim=0)
+            dist = MultivariateNormal(action_mean, cov_mat)
+        else:
+            action_probs = self.actor(state)
+            dist = Categorical(action_probs)
+
+        action = dist.sample()
+        action_logprob = dist.log_prob(action)
+
+        return action.detach(), action_logprob.detach()
+
 
 class ActorCritic:
     def __init__(self, nagents, state_dim, action_dim, lr_actor, lr_critic, gamma, has_continuous_action_space,
@@ -109,6 +123,7 @@ class ActorCritic:
             state = torch.FloatTensor(state).to(device)
             obs = torch.FloatTensor(obs.flatten()).to(device)
             action, action_logprob = self.policy_old.act(state)
+
         self.buffer.observations.append(obs)
         self.buffer.states.append(state)
         self.buffer.actions.append(action)
